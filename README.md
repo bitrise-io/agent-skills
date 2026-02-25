@@ -35,22 +35,18 @@ To install all skills from this repo:
 npx skills add bitrise-io/agent-skills
 ```
 
-By default this installs skills for your current project (`.claude/skills/`). Add `--global` to make them available across all your projects:
-
-```bash
-npx skills add bitrise-io/agent-skills --global
-```
-
-To list available skills without installing:
-
-```bash
-npx skills add bitrise-io/agent-skills --list
-```
+By default this installs skills for your current project (`.claude/skills/`). Add `--global` to make them available across all your projects.
 
 To install a specific skill by name:
 
 ```bash
 npx skills add bitrise-io/agent-skills --skill using-bitrise-ci
+```
+
+To update all skills (check for updates regularly):
+
+```
+npx skills update
 ```
 
 ### Manual installation
