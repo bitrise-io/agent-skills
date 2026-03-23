@@ -19,7 +19,7 @@ description: |
 - Tools (Authentication, MCP, API, CLI)
 - Core concepts
 - Creating projects
-- Working with bitrise.yml (Structure, Components)
+- Working with bitrise.yml (Structure, Components, Docker Containers)
 - Troubleshooting builds
 
 ## Automated access
@@ -79,6 +79,8 @@ Builds run on a virtual machine for a **stack** (a combination of specific versi
 
 **Pipelines** allow creating complex processes from workflows with dependencies, parallel or sequential execution, sharding and sharing files.
 
+**Containers** (execution and service) allow Steps and Step bundles to run in isolated Docker environments or alongside background Docker services. Linux-only — not supported on macOS stacks.
+
 **Environment variables** (envs for short) are configuration variables that can be defined on various levels and are passed to components as inputs. See [this page](https://docs.bitrise.io/en/bitrise-ci/references/available-environment-variables.html) for built-in envs available during builds.
 
 **Secrets** are envs with protected values: they are stored encrypted, and are redacted in build logs.
@@ -137,6 +139,7 @@ See [Schemastore](https://github.com/SchemaStore/schemastore/blob/master/src/sch
 
 - `format_version` is a required field describing the configuration schema version (use `"25"` for latest features)
 - `default_step_lib_source` is also required, it describes where steps should be loaded from unless specified otherwise. Use https://github.com/bitrise-io/bitrise-steplib.git as value.
+- `containers` defines Docker execution and service containers available to Steps and Step bundles (Linux only)
 - `step_bundles`, `workflows` and `pipelines` list the entities described above (formatted as a map with ID as key)
 - `app` can be used to define app-level envs:
   ```yaml
@@ -271,6 +274,95 @@ workflows:
 ```
 
 **ALWAYS prefer step bundles to the obsolete `before_run` or `after_run` constructs when creating new workflows, leave them in existing ones.**
+
+### Docker Containers
+
+Docker containers let Steps and Step bundles run in isolated Docker environments or alongside background services. **Linux-only — not supported on macOS stacks.**
+
+Containers are defined at the top level under a `containers` key and referenced from individual Steps or Step bundles.
+
+#### Execution containers
+
+Run a Step inside a specific Docker image using `type: execution`:
+
+```yaml
+containers:
+  node-21:
+    type: execution
+    image: node:21.6
+    ports:
+      - 3000:3000
+    credentials:
+      username: $DOCKER_USERNAME
+      password: $DOCKER_PASSWORD
+```
+
+Reference from a Step with `execution_container`:
+
+```yaml
+workflows:
+  ci:
+    steps:
+      - script@1:
+          execution_container: node-21
+          inputs:
+            - content: node --version
+```
+
+Key behaviors:
+- **Closest-wins inheritance**: a Step uses its own `execution_container` definition first, then the parent Step bundle's, then the grandparent's. Only one execution container activates per Step.
+- **File sharing**: `/bitrise`, `/root/.bitrise`, and `/tmp` are shared between all containers and the host. Default working directory is `/bitrise/src`.
+- **Container reuse**: containers are reused across steps by default; set `recreate: true` to force a fresh instance.
+
+#### Service containers
+
+Run background Docker services (databases, HTTP servers, etc.) alongside Steps using `type: service`:
+
+```yaml
+containers:
+  postgres:
+    type: service
+    image: postgres:16
+    ports:
+      - 5432:5432
+    credentials:
+      username: $DOCKER_USERNAME
+      password: $DOCKER_PASSWORD
+      server: us-central1-docker.pkg.dev
+    options: >-
+      --health-cmd pg_isready
+      --health-interval 10s
+```
+
+Reference from a Step with `service_containers`:
+
+```yaml
+workflows:
+  ci:
+    steps:
+      - script@1:
+          service_containers:
+            - postgres
+            - redis
+```
+
+Key behaviors:
+- **Additive inheritance**: service containers accumulate from all ancestor Step bundle levels — unlike execution containers, they are not overridden by the nearest parent.
+- **Networking**: all service containers share a `bitrise` Docker network.
+  - When the Step uses an **execution container**: access services by container ID as hostname (e.g., `http://postgres:5432`).
+  - When the Step runs **directly on the host**: access services via `localhost` (e.g., `http://localhost:5432`).
+
+#### Credentials
+
+Store Docker registry credentials as Secrets and reference them in the `credentials` block (`username`, `password`, and optionally `server` for non-Docker Hub registries).
+
+#### Unsupported options
+
+The `--network`, `--volume` (`-v`), and `--entrypoint` Docker options are not supported in the `options` field.
+
+#### Building custom Docker images
+
+Use the `docker-build-push` step to build and push a custom image during a workflow, which can then be referenced as a container image in subsequent builds.
 
 ### Building pipelines
 
