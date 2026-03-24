@@ -292,27 +292,50 @@ containers:
     image: node:21.6
     ports:
       - 3000:3000
+    envs:
+      - NODE_ENV: ci
     credentials:
       username: $DOCKER_USERNAME
       password: $DOCKER_PASSWORD
 ```
 
-Reference from a Step with `execution_container`:
+Reference from a Step with `execution_container` (string shorthand, or object form to set options):
 
 ```yaml
 workflows:
   ci:
     steps:
       - script@1:
-          execution_container: node-21
+          execution_container: node-21          # string shorthand: reuse existing instance
+          inputs:
+            - content: node --version
+      - script@1:
+          execution_container:
+            node-21:
+              recreate: true                    # object form: discard and start fresh
           inputs:
             - content: node --version
 ```
 
 Key behaviors:
 - **Closest-wins inheritance**: a Step uses its own `execution_container` definition first, then the parent Step bundle's, then the grandparent's. Only one execution container activates per Step.
+- **Usage-side override**: when referencing a Step bundle, setting `execution_container` at the call site overrides the container defined inside the bundle definition. Override priority is: **Step-level > bundle call-site > bundle definition**.
+  ```yaml
+  step_bundles:
+    run-tests:
+      execution_container: ruby   # bundle definition default
+      steps:
+      - script@1:
+          inputs:
+          - content: bundle exec rspec
+  workflows:
+    ci:
+      steps:
+      - bundle::run-tests:
+          execution_container: ruby-3-3   # call-site overrides the definition
+  ```
 - **File sharing**: `/bitrise`, `/root/.bitrise`, and `/tmp` are shared between all containers and the host. Default working directory is `/bitrise/src`.
-- **Container reuse**: containers are reused across steps by default; set `recreate: true` to force a fresh instance.
+- **Container reuse**: containers are reused across steps by default; use the object form with `recreate: true` to force a fresh instance (see example above).
 
 #### Service containers
 
@@ -325,6 +348,8 @@ containers:
     image: postgres:16
     ports:
       - 5432:5432
+    envs:
+      - POSTGRES_PASSWORD: $POSTGRES_PASSWORD
     credentials:
       username: $DOCKER_USERNAME
       password: $DOCKER_PASSWORD
@@ -334,7 +359,7 @@ containers:
       --health-interval 10s
 ```
 
-Reference from a Step with `service_containers`:
+Reference from a Step with `service_containers` (mix of string shorthand and object form):
 
 ```yaml
 workflows:
@@ -342,12 +367,14 @@ workflows:
     steps:
       - script@1:
           service_containers:
-            - postgres
-            - redis
+            - postgres:
+                recreate: true    # object form: discard and start fresh
+            - redis               # string shorthand: reuse existing instance
 ```
 
 Key behaviors:
 - **Additive inheritance**: service containers accumulate from all ancestor Step bundle levels — unlike execution containers, they are not overridden by the nearest parent.
+- **Usage-side override**: setting `service_containers` at the bundle call-site overrides the service containers defined inside the bundle definition.
 - **Networking**: all service containers share a `bitrise` Docker network.
   - When the Step uses an **execution container**: access services by container ID as hostname (e.g., `http://postgres:5432`).
   - When the Step runs **directly on the host**: access services via `localhost` (e.g., `http://localhost:5432`).
@@ -359,6 +386,10 @@ Store Docker registry credentials as Secrets and reference them in the `credenti
 #### Unsupported options
 
 The `--network`, `--volume` (`-v`), and `--entrypoint` Docker options are not supported in the `options` field.
+
+#### Legacy `with:` group
+
+An older syntax uses a `with:` block inside the steps list, with `container` (string) and `services` (list of strings) properties. **Do not use this for new configurations** — it cannot be mixed with the step-based `execution_container`/`service_containers` syntax in the same `bitrise.yml`.
 
 #### Building custom Docker images
 
